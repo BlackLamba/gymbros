@@ -1,4 +1,4 @@
-import { type EditorExercise, toPayload } from '@/lib/workout-editor'
+import { type EditorExercise, toFinalPayload, toPayload } from '@/lib/workout-editor'
 
 /**
  * Сохранность активной тренировки.
@@ -15,6 +15,8 @@ export type FinishResult = 'ok' | 'offline' | 'auth' | 'gone' | 'error'
 type Draft = {
   v: 1
   exercises: EditorExercise[]
+  /** Название сплита, загруженного в тренировку */
+  splitName?: string | null
   /** Есть изменения, которые ещё не дошли до сервера */
   dirty: boolean
   /** updated_at тренировки на сервере на момент последней успешной синхронизации */
@@ -69,8 +71,10 @@ function pruneDrafts(keepWorkoutId: string) {
 export class WorkoutSync {
   readonly initialExercises: EditorExercise[]
   readonly initialFinishAt: number | null
+  readonly initialSplitName: string | null
 
   private exercises: EditorExercise[]
+  private splitName: string | null
   private version = 0
   private synced = 0
   private base: string | null
@@ -86,6 +90,7 @@ export class WorkoutSync {
     private readonly workoutId: string,
     serverUpdatedAt: string,
     serverExercises: EditorExercise[],
+    serverSplitName: string | null = null,
   ) {
     pruneDrafts(workoutId)
     const draft = readDraft(workoutId)
@@ -95,6 +100,8 @@ export class WorkoutSync {
     // правили с другого устройства — берём серверную версию.
     if (draft && (draft.dirty || draft.base === serverUpdatedAt)) {
       this.exercises = draft.exercises
+      // В черновиках прежней версии поля нет — тогда берём серверное значение
+      this.splitName = draft.splitName === undefined ? serverSplitName : draft.splitName
       this.base = draft.base
       this.finishAt = draft.finishAt ?? null
       if (draft.dirty) {
@@ -103,11 +110,13 @@ export class WorkoutSync {
       }
     } else {
       this.exercises = serverExercises
+      this.splitName = serverSplitName
       this.base = serverUpdatedAt
       this.finishAt = null
     }
     this.initialExercises = this.exercises
     this.initialFinishAt = this.finishAt
+    this.initialSplitName = this.splitName
   }
 
   // --- подписка для useSyncExternalStore -----------------------------------
@@ -137,14 +146,16 @@ export class WorkoutSync {
     writeDraft(this.workoutId, {
       v: 1,
       exercises: this.exercises,
+      splitName: this.splitName,
       dirty: this.dirty,
       base: this.base,
       finishAt: this.finishAt,
     })
   }
 
-  change(exercises: EditorExercise[]) {
+  change(exercises: EditorExercise[], splitName: string | null = this.splitName) {
     this.exercises = exercises
+    this.splitName = splitName
     this.version++
     this.persist()
     this.schedule(DEBOUNCE_MS)
@@ -194,7 +205,10 @@ export class WorkoutSync {
     let retry = false
 
     try {
-      const response = await this.request({ exercises: toPayload(this.exercises), expect: 'active' }, keepalive)
+      const response = await this.request(
+        { exercises: toPayload(this.exercises), expect: 'active', splitName: this.splitName },
+        keepalive,
+      )
       if (this.paused) return
 
       if (response.ok) {
@@ -266,11 +280,14 @@ export class WorkoutSync {
   async finish(finishedAt: number): Promise<FinishResult> {
     this.paused = true
     clearTimeout(this.timer)
-    const exercises = toPayload(this.exercises)
+    // Упражнения без подходов (например, пропущенные из сплита) в запись не попадают
+    const exercises = toFinalPayload(this.exercises)
+    const splitName = this.splitName
 
     try {
       let response = await this.request({
         exercises,
+        splitName,
         expect: 'active',
         finish: true,
         finishedAt: new Date(finishedAt).toISOString(),
@@ -279,7 +296,7 @@ export class WorkoutSync {
       // Тренировка уже завершена: ответ на прошлую попытку мог потеряться.
       // Досохраняем содержимое, чтобы последние правки не пропали.
       if (response.status === 409) {
-        response = await this.request({ exercises, expect: 'completed' })
+        response = await this.request({ exercises, splitName, expect: 'completed' })
       }
 
       if (response.ok) {

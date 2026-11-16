@@ -1,9 +1,9 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Check, LoaderCircle, Plus, Search } from 'lucide-react'
+import { Check, ListChecks, LoaderCircle, Plus, Search } from 'lucide-react'
 import { formatDateShort, formatSet } from '@/lib/format'
-import type { Exercise, ExerciseContext } from '@/lib/types'
+import type { Exercise, ExerciseContext, Split } from '@/lib/types'
 import { MAX_EXERCISES_IN_LIBRARY } from '@/lib/validation'
 import { Sheet } from '@/components/ui/dialog'
 
@@ -16,6 +16,8 @@ export function ExercisePicker({
   contexts,
   usedIds,
   tz,
+  splits = [],
+  onPickSplit,
   onPick,
   onCreate,
 }: {
@@ -25,6 +27,9 @@ export function ExercisePicker({
   contexts: Record<string, ExerciseContext>
   usedIds: Set<string>
   tz: string
+  /** Сплиты, которые можно добавить в тренировку целиком */
+  splits?: Split[]
+  onPickSplit?: (split: Split) => void
   onPick: (exercise: Exercise) => void
   /** Создаёт упражнение в личном списке; возвращает false, если не получилось */
   onCreate: (name: string) => Promise<boolean>
@@ -93,6 +98,25 @@ export function ExercisePicker({
       </form>
 
       <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+        {!q && splits.length > 0 && onPickSplit ? (
+          <li className="px-2 pb-2">
+            <p className="pb-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">Сплит целиком</p>
+            <div className="flex flex-wrap gap-2">
+              {splits.map((split) => (
+                <button
+                  key={split.id}
+                  type="button"
+                  onClick={() => onPickSplit(split)}
+                  className="flex h-11 max-w-full items-center gap-2 rounded-xl bg-surface-2 px-3.5 text-[15px] font-semibold transition-colors active:bg-border"
+                >
+                  <ListChecks className="size-4 shrink-0 text-accent-text" />
+                  <span className="truncate">{split.name}</span>
+                </button>
+              ))}
+            </div>
+          </li>
+        ) : null}
+
         {canCreate ? (
           <li>
             <button

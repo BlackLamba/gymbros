@@ -119,8 +119,9 @@ async function Dashboard() {
             <p className="tabular mt-0.5 text-sm text-muted">
               {formatDateShort(last.startedAt, tz)}, {formatTime(last.startedAt, tz)} · {formatDuration(last.durationSeconds)}
             </p>
+            {last.splitName ? <p className="mt-3 break-words text-[15px] font-semibold">{last.splitName}</p> : null}
             {last.exercises.length > 0 ? (
-              <p className="mt-3 line-clamp-2 text-[15px] leading-relaxed">
+              <p className={`${last.splitName ? 'mt-1 text-muted' : 'mt-3'} line-clamp-2 text-[15px] leading-relaxed`}>
                 {last.exercises.map((e) => e.name).join(' · ')}
               </p>
             ) : null}

@@ -20,6 +20,8 @@ export type Workout = {
   durationSeconds: number | null
   /** Метка последнего изменения на сервере — по ней черновик на устройстве понимает, актуален ли он */
   updatedAt: string
+  /** Название сплита, по которому шла тренировка (снимок на момент тренировки) */
+  splitName: string | null
   exercises: WorkoutExercise[]
 }
 
@@ -29,6 +31,7 @@ export type WorkoutSummary = {
   startedAt: string
   finishedAt: string | null
   durationSeconds: number | null
+  splitName: string | null
   exerciseNames: string[]
   setsCount: number
 }
@@ -36,6 +39,13 @@ export type WorkoutSummary = {
 export type Exercise = {
   id: string
   name: string
+}
+
+/** Сплит — именованный список упражнений из личного списка, в нужном порядке. */
+export type Split = {
+  id: string
+  name: string
+  exercises: Exercise[]
 }
 
 /** Всё, что известно об упражнении по прошлым завершённым тренировкам. */

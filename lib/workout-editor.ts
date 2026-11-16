@@ -1,4 +1,4 @@
-import type { ExerciseContext, SetValue, WorkoutExercise, WorkoutPayloadExercise } from '@/lib/types'
+import type { Exercise, ExerciseContext, SetValue, WorkoutExercise, WorkoutPayloadExercise } from '@/lib/types'
 import { MAX_REPS, MAX_WEIGHT } from '@/lib/validation'
 
 /**
@@ -170,4 +170,31 @@ export function move<T>(list: T[], from: number, to: number): T[] {
   const [item] = next.splice(from, 1)
   next.splice(to, 0, item)
   return next
+}
+
+/**
+ * Загрузка сплита в тренировку: упражнения сплита добавляются в конец в его порядке.
+ * Те, что уже есть в тренировке, не дублируются. Подходы не создаются: записывается
+ * только то, что человек действительно сделал («+ Подход» подставит прошлый результат).
+ */
+export function addSplitExercises(
+  current: EditorExercise[],
+  splitExercises: Exercise[],
+  maxExercises: number,
+): { exercises: EditorExercise[]; added: number; skipped: number } {
+  const present = new Set(current.map((e) => e.exerciseId).filter((id): id is string => id !== null))
+  const missing = splitExercises.filter((e, i, all) => !present.has(e.id) && all.findIndex((x) => x.id === e.id) === i)
+  const room = Math.max(0, maxExercises - current.length)
+  const toAdd = missing.slice(0, room)
+  if (toAdd.length === 0) return { exercises: current, added: 0, skipped: missing.length }
+  return {
+    exercises: [...current, ...toAdd.map((e) => ({ id: newId(), exerciseId: e.id, name: e.name, sets: [] }))],
+    added: toAdd.length,
+    skipped: missing.length - toAdd.length,
+  }
+}
+
+/** В запись попадают только упражнения, в которых есть хотя бы один заполненный подход. */
+export function toFinalPayload(exercises: EditorExercise[]): WorkoutPayloadExercise[] {
+  return toPayload(exercises).filter((e) => e.sets.length > 0)
 }

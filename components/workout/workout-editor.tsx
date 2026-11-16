@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronUp,
   CloudOff,
+  ListChecks,
   LoaderCircle,
   Plus,
   Trash2,
@@ -17,13 +18,14 @@ import {
 } from 'lucide-react'
 import { createExercise, deleteWorkout } from '@/lib/actions'
 import { toLocalInputValue } from '@/lib/dates'
-import { formatDate, formatDateShort, formatSetCompact, formatTime } from '@/lib/format'
-import type { Exercise, ExerciseContext, WorkoutExercise } from '@/lib/types'
+import { WORDS, countLabel, formatDate, formatDateShort, formatSetCompact, formatTime } from '@/lib/format'
+import type { Exercise, ExerciseContext, Split, WorkoutExercise } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { MAX_EXERCISES_IN_WORKOUT, MAX_SETS_PER_EXERCISE } from '@/lib/validation'
 import {
   type EditorExercise,
   type EditorSet,
+  addSplitExercises,
   fromWorkout,
   move,
   newId,
@@ -45,9 +47,11 @@ import { useIsClient } from './use-now'
 
 type Props = {
   mode: 'active' | 'edit'
-  workout: { id: string; startedAt: string; finishedAt: string | null; updatedAt: string }
+  workout: { id: string; startedAt: string; finishedAt: string | null; updatedAt: string; splitName?: string | null }
   initialExercises: WorkoutExercise[]
   library: Exercise[]
+  /** Сплиты пользователя — их можно загрузить в активную тренировку целиком */
+  splits?: Split[]
   /** История по упражнениям: подсказка «в прошлый раз» и значения для нового подхода */
   contexts: Record<string, ExerciseContext>
   tz: string
@@ -76,12 +80,16 @@ export function EditorSkeleton() {
 const noSubscribe = () => () => {}
 const savedStatus = (): SyncStatus => 'saved'
 
-function Editor({ mode, workout, initialExercises, library: initialLibrary, contexts, tz }: Props) {
+const NO_SPLITS: Split[] = []
+
+function Editor({ mode, workout, initialExercises, library: initialLibrary, splits = NO_SPLITS, contexts, tz }: Props) {
   const router = useRouter()
   const isActive = mode === 'active'
 
   const [sync] = useState(() =>
-    isActive ? new WorkoutSync(workout.id, workout.updatedAt, fromWorkout(initialExercises)) : null,
+    isActive
+      ? new WorkoutSync(workout.id, workout.updatedAt, fromWorkout(initialExercises), workout.splitName ?? null)
+      : null,
   )
   const status = useSyncExternalStore(sync?.subscribe ?? noSubscribe, sync?.getStatus ?? savedStatus, savedStatus)
 
@@ -89,6 +97,7 @@ function Editor({ mode, workout, initialExercises, library: initialLibrary, cont
     () => sync?.initialExercises ?? fromWorkout(initialExercises),
   )
   const [library, setLibrary] = useState(initialLibrary)
+  const [splitName, setSplitName] = useState<string | null>(() => sync?.initialSplitName ?? workout.splitName ?? null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [finishAt, setFinishAt] = useState<number | null>(() => sync?.initialFinishAt ?? null)
   const [pending, setPending] = useState(false)
@@ -100,15 +109,25 @@ function Editor({ mode, workout, initialExercises, library: initialLibrary, cont
 
   // Актуальное состояние для обработчиков: они стабильны и не зависят от рендера
   const latest = useRef(exercises)
+  const latestSplit = useRef(splitName)
 
   const apply = useCallback(
-    (update: (current: EditorExercise[]) => EditorExercise[]) => {
+    (update: (current: EditorExercise[]) => EditorExercise[], nextSplit?: string) => {
       const next = update(latest.current)
       if (next === latest.current) return
       latest.current = next
       setExercises(next)
-      if (sync) sync.change(next)
-      else setDirty(true)
+      if (sync) {
+        // Название сплита живёт вместе с упражнениями: убрали все — тренировка снова «без сплита»
+        const split = next.length === 0 ? null : (nextSplit ?? latestSplit.current)
+        if (split !== latestSplit.current) {
+          latestSplit.current = split
+          setSplitName(split)
+        }
+        sync.change(next, split)
+      } else {
+        setDirty(true)
+      }
     },
     [sync],
   )
@@ -159,6 +178,34 @@ function Editor({ mode, workout, initialExercises, library: initialLibrary, cont
       }, 320)
     },
     [apply, contexts],
+  )
+
+  /** Загружает сплит: его упражнения появляются в тренировке сразу, без подходов. */
+  const loadSplit = useCallback(
+    (split: Split) => {
+      const wasEmpty = latest.current.length === 0
+      const result = addSplitExercises(latest.current, split.exercises, MAX_EXERCISES_IN_WORKOUT)
+      setPickerOpen(false)
+      if (result.added === 0) {
+        toast.info(
+          split.exercises.length === 0
+            ? `В сплите «${split.name}» пока нет упражнений`
+            : result.skipped > 0
+              ? `В одной тренировке не больше ${MAX_EXERCISES_IN_WORKOUT} упражнений`
+              : `Все упражнения из «${split.name}» уже в тренировке`,
+        )
+        return
+      }
+      // Название тренировке даёт первый загруженный сплит
+      apply(() => result.exercises, wasEmpty || !latestSplit.current ? split.name : undefined)
+      if (!wasEmpty) {
+        const firstId = result.exercises[result.exercises.length - result.added].id
+        window.setTimeout(() => {
+          document.getElementById(`exercise-${firstId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 320)
+      }
+    },
+    [apply],
   )
 
   const createAndAdd = useCallback(
@@ -390,6 +437,7 @@ function Editor({ mode, workout, initialExercises, library: initialLibrary, cont
     return (
       <FinishSummary
         exercises={exercises}
+        splitName={splitName}
         startedAt={workout.startedAt}
         finishAt={finishAt}
         tz={tz}
@@ -429,7 +477,15 @@ function Editor({ mode, workout, initialExercises, library: initialLibrary, cont
             {isActive ? (
               <>
                 <LiveTimer startedAt={workout.startedAt} className="block text-[32px] font-semibold leading-none tracking-tight" />
-                <p className="tabular mt-1 text-xs text-muted">начало в {formatTime(workout.startedAt, tz)}</p>
+                <p className="tabular mx-auto mt-1 max-w-[11rem] truncate text-xs text-muted">
+                  {splitName ? (
+                    <>
+                      <span className="font-semibold text-fg">{splitName}</span> · с {formatTime(workout.startedAt, tz)}
+                    </>
+                  ) : (
+                    <>начало в {formatTime(workout.startedAt, tz)}</>
+                  )}
+                </p>
               </>
             ) : (
               <>
@@ -487,6 +543,37 @@ function Editor({ mode, workout, initialExercises, library: initialLibrary, cont
               />
             </label>
           </Card>
+        ) : null}
+
+        {isActive && exercises.length === 0 && splits.length > 0 ? (
+          <section aria-label="Сплиты" className="mt-2">
+            <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">Загрузить сплит</p>
+            <div className="flex flex-col gap-2">
+              {splits.map((split) => (
+                <button
+                  key={split.id}
+                  type="button"
+                  onClick={() => loadSplit(split)}
+                  className="flex min-h-16 w-full items-center gap-3.5 rounded-3xl border border-border bg-surface px-4 py-3 text-left transition-colors active:bg-surface-2"
+                >
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-accent text-accent-fg">
+                    <ListChecks className="size-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block break-words text-[17px] font-semibold leading-snug">{split.name}</span>
+                    <span className="mt-0.5 block truncate text-sm text-muted">
+                      {split.exercises.length > 0
+                        ? `${countLabel(split.exercises.length, WORDS.exercises)} · ${split.exercises.map((e) => e.name).join(', ')}`
+                        : 'пока без упражнений'}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="mb-1 mt-5 px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
+              Или собрать с нуля
+            </p>
+          </section>
         ) : null}
 
         {exercises.length === 0 ? (
@@ -564,6 +651,8 @@ function Editor({ mode, workout, initialExercises, library: initialLibrary, cont
         contexts={contexts}
         usedIds={usedIds}
         tz={tz}
+        splits={isActive ? splits : NO_SPLITS}
+        onPickSplit={loadSplit}
         onPick={addExercise}
         onCreate={createAndAdd}
       />

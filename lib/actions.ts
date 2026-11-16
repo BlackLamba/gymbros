@@ -7,7 +7,13 @@ import { getSession } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import type { ActionResult, Exercise } from '@/lib/types'
 import { isUuid } from '@/lib/utils'
-import { MAX_EXERCISES_IN_LIBRARY, displayNameSchema, exerciseNameSchema } from '@/lib/validation'
+import {
+  MAX_EXERCISES_IN_LIBRARY,
+  MAX_SPLITS,
+  displayNameSchema,
+  exerciseNameSchema,
+  splitInputSchema,
+} from '@/lib/validation'
 
 /**
  * Server Actions. Каждое действие само проверяет сессию и входные данные;
@@ -209,6 +215,55 @@ export async function deleteExercise(id: string): Promise<ActionResult> {
   const { data, error } = await session.supabase.from('exercises').delete().eq('id', id).select('id')
   if (error) return { ok: false, error: GENERIC_ERROR }
   if (!data?.length) return { ok: false, error: 'Упражнение не найдено.' }
+
+  refresh()
+  return { ok: true }
+}
+
+// ---------------------------------------------------------------------------
+// Сплиты
+// ---------------------------------------------------------------------------
+
+function splitError(error: DbError): string {
+  const message = error.message ?? ''
+  if (message.includes('split_limit_reached')) return `Можно создать не больше ${MAX_SPLITS} сплитов. Удали ненужный.`
+  if (message.includes('split_not_found')) return 'Сплит не найден — возможно, он был удалён.'
+  if (message.includes('invalid_exercises')) return 'Какого-то упражнения уже нет в твоём списке. Обнови страницу и попробуй ещё раз.'
+  if (error.code === '23505') return 'Сплит с таким названием уже есть.'
+  return GENERIC_ERROR
+}
+
+/** Создаёт сплит (без id) или сохраняет изменения существующего. */
+export async function saveSplit(input: {
+  id?: string
+  name: string
+  exerciseIds: string[]
+}): Promise<ActionResult<{ id: string }>> {
+  const session = await getSession()
+  if (!session) return { ok: false, error: SESSION_EXPIRED }
+
+  const parsed = splitInputSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message }
+
+  const { data, error } = await session.supabase.rpc('save_split', {
+    p_split_id: parsed.data.id ?? null,
+    p_name: parsed.data.name,
+    p_exercise_ids: [...new Set(parsed.data.exerciseIds)],
+  })
+  if (error) return { ok: false, error: splitError(error) }
+
+  refresh()
+  return { ok: true, data: { id: data as string } }
+}
+
+export async function deleteSplit(id: string): Promise<ActionResult> {
+  const session = await getSession()
+  if (!session) return { ok: false, error: SESSION_EXPIRED }
+  if (!isUuid(id)) return { ok: false, error: 'Сплит не найден.' }
+
+  const { data, error } = await session.supabase.from('splits').delete().eq('id', id).select('id')
+  if (error) return { ok: false, error: GENERIC_ERROR }
+  if (!data?.length) return { ok: false, error: 'Сплит не найден.' }
 
   refresh()
   return { ok: true }

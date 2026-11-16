@@ -19,7 +19,7 @@ const ITEMS = [
     href: '/profile',
     label: 'Профиль',
     icon: UserRound,
-    match: (p: string) => p.startsWith('/profile') || p.startsWith('/exercises'),
+    match: (p: string) => p.startsWith('/profile') || p.startsWith('/exercises') || p.startsWith('/friend'),
   },
 ] as const
 

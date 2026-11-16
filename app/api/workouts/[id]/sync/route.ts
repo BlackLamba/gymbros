@@ -46,6 +46,8 @@ export async function POST(request: Request, context: RouteContext<'/api/workout
     p_finish: input.finish ?? false,
     p_started_at: input.startedAt ?? null,
     p_finished_at: input.finishedAt ?? null,
+    // undefined → null: название сплита не трогаем; null → '': убираем
+    p_split_name: input.splitName === undefined ? null : (input.splitName ?? ''),
   })
 
   if (error) {
@@ -64,6 +66,7 @@ export async function POST(request: Request, context: RouteContext<'/api/workout
     startedAt: data.started_at,
     finishedAt: data.finished_at,
     updatedAt: data.updated_at,
+    splitName: data.split_name ?? null,
   })
 }
 

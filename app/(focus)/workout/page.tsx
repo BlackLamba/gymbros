@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
-import { getActiveWorkout, getExercises, getProgressContext } from '@/lib/data'
+import { getActiveWorkout, getExercises, getProgressContext, getSplits } from '@/lib/data'
 import { getTimeZone } from '@/lib/tz'
 import { EditorSkeleton, WorkoutEditor } from '@/components/workout/workout-editor'
 
@@ -16,7 +16,12 @@ export default function ActiveWorkoutPage() {
 }
 
 async function ActiveWorkout() {
-  const [workout, library, tz] = await Promise.all([getActiveWorkout(), getExercises(), getTimeZone()])
+  const [workout, library, splits, tz] = await Promise.all([
+    getActiveWorkout(),
+    getExercises(),
+    getSplits(),
+    getTimeZone(),
+  ])
   if (!workout) redirect('/')
 
   // История нужна по всему личному списку: подсказка «в прошлый раз» видна уже при выборе упражнения
@@ -31,9 +36,11 @@ async function ActiveWorkout() {
         startedAt: workout.startedAt,
         finishedAt: workout.finishedAt,
         updatedAt: workout.updatedAt,
+        splitName: workout.splitName,
       }}
       initialExercises={workout.exercises}
       library={library}
+      splits={splits}
       contexts={contexts}
       tz={tz}
     />

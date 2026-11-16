@@ -14,6 +14,7 @@ const LONG_WORKOUT_SECONDS = 4 * 3600
 /** Экран итогов перед сохранением. До подтверждения тренировка остаётся активной. */
 export function FinishSummary({
   exercises,
+  splitName,
   startedAt,
   finishAt,
   tz,
@@ -23,6 +24,7 @@ export function FinishSummary({
   onConfirm,
 }: {
   exercises: EditorExercise[]
+  splitName?: string | null
   startedAt: string
   finishAt: number
   tz: string
@@ -37,10 +39,12 @@ export function FinishSummary({
   const filled = exercises
     .map((e) => ({ id: e.id, name: e.name, sets: e.sets.map(toSetValue).filter((s) => s !== null) }))
     .filter((e) => e.sets.length > 0)
+  // Упражнения, в которых нет ни одного заполненного подхода (например, пропущенные из сплита)
+  const skipped = exercises.length - filled.length
 
   return (
     <div className="animate-fade-in px-4 pb-[calc(env(safe-area-inset-bottom)+10.5rem)] pt-[calc(env(safe-area-inset-top)+1.25rem)]">
-      <Eyebrow>Итоги тренировки</Eyebrow>
+      <Eyebrow>{splitName ? `Итоги тренировки · ${splitName}` : 'Итоги тренировки'}</Eyebrow>
       <h1 className="mt-1 text-[28px] font-semibold leading-tight tracking-tight">
         {capitalize(formatWeekday(startedAt, tz))}, {formatDate(startedAt, tz)}
       </h1>
@@ -86,6 +90,13 @@ export function FinishSummary({
             {totals.incompleteSets === 1 ? 'попадёт' : 'попадут'} в запись. Вернись к тренировке, чтобы дозаполнить.
           </p>
         </div>
+      ) : null}
+
+      {skipped > 0 ? (
+        <p className="mt-4 px-1 text-sm leading-relaxed text-muted">
+          {skipped === 1 ? 'Одно упражнение' : `${skipped} ${plural(skipped, WORDS.exercises)}`} без подходов в запись не{' '}
+          {skipped === 1 ? 'попадёт' : 'попадут'}.
+        </p>
       ) : null}
 
       <div className="mt-6 flex flex-col gap-2">

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ExerciseContext } from '@/lib/types'
 import {
   type EditorExercise,
+  addSplitExercises,
   fromWorkout,
   move,
   nextSetDefaults,
@@ -11,6 +12,7 @@ import {
   sanitizeWeightInput,
   stepReps,
   stepWeight,
+  toFinalPayload,
   toPayload,
   totalsOf,
 } from './workout-editor'
@@ -135,5 +137,61 @@ describe('порядок упражнений', () => {
     const list = ['a', 'b', 'c']
     expect(move(list, 0, -1)).toBe(list)
     expect(move(list, 2, 3)).toBe(list)
+  })
+})
+
+describe('загрузка сплита', () => {
+  const split = [
+    { id: 'e1', name: 'Жим лёжа' },
+    { id: 'e2', name: 'Подтягивания' },
+    { id: 'e3', name: 'Присед' },
+  ]
+
+  it('в пустую тренировку добавляет все упражнения по порядку и без подходов', () => {
+    const result = addSplitExercises([], split, 40)
+    expect(result.added).toBe(3)
+    expect(result.skipped).toBe(0)
+    expect(result.exercises.map((e) => [e.exerciseId, e.name, e.sets.length])).toEqual([
+      ['e1', 'Жим лёжа', 0],
+      ['e2', 'Подтягивания', 0],
+      ['e3', 'Присед', 0],
+    ])
+    expect(new Set(result.exercises.map((e) => e.id)).size).toBe(3)
+  })
+
+  it('не дублирует упражнения, которые уже есть, и не трогает записанные подходы', () => {
+    const current = [ex([['80', '8']], 'e2')]
+    const result = addSplitExercises(current, split, 40)
+    expect(result.added).toBe(2)
+    expect(result.exercises[0]).toBe(current[0])
+    expect(result.exercises.map((e) => e.exerciseId)).toEqual(['e2', 'e1', 'e3'])
+  })
+
+  it('если добавлять нечего — возвращает тот же список', () => {
+    const current = [ex([], 'e1'), ex([], 'e2'), ex([], 'e3')]
+    const result = addSplitExercises(current, split, 40)
+    expect(result.exercises).toBe(current)
+    expect(result).toMatchObject({ added: 0, skipped: 0 })
+  })
+
+  it('соблюдает лимит упражнений в тренировке', () => {
+    const current = [ex([], 'a'), ex([], 'b')]
+    const result = addSplitExercises(current, split, 3)
+    expect(result).toMatchObject({ added: 1, skipped: 2 })
+    expect(result.exercises.map((e) => e.exerciseId)).toEqual(['a', 'b', 'e1'])
+    expect(addSplitExercises(result.exercises, split, 3)).toMatchObject({ added: 0, skipped: 2 })
+  })
+
+  it('повтор одного упражнения внутри сплита учитывается один раз', () => {
+    const result = addSplitExercises([], [...split, split[0]], 40)
+    expect(result.exercises.map((e) => e.exerciseId)).toEqual(['e1', 'e2', 'e3'])
+  })
+})
+
+describe('итоговая запись тренировки', () => {
+  it('упражнения без заполненных подходов в запись не попадают', () => {
+    const exercises = [ex([['80', '8']], 'e1'), ex([], 'e2'), ex([['', '']], 'e3'), ex([['', '12']], 'e4')]
+    expect(toPayload(exercises)).toHaveLength(4)
+    expect(toFinalPayload(exercises).map((e) => e.exercise_id)).toEqual(['e1', 'e4'])
   })
 })

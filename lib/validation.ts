@@ -5,6 +5,8 @@ export const MAX_EXERCISES_IN_WORKOUT = 40
 export const MAX_SETS_PER_EXERCISE = 50
 export const MAX_WEIGHT = 999.99
 export const MAX_REPS = 999
+export const MAX_SPLITS = 12
+export const MAX_SPLIT_NAME = 40
 
 export const exerciseNameSchema = z
   .string()
@@ -17,6 +19,18 @@ export const displayNameSchema = z
   .trim()
   .min(1, 'Введите имя')
   .max(40, 'Имя не длиннее 40 символов')
+
+export const splitNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Введи название сплита')
+  .max(MAX_SPLIT_NAME, `Название не длиннее ${MAX_SPLIT_NAME} символов`)
+
+export const splitInputSchema = z.object({
+  id: z.uuid().optional(),
+  name: splitNameSchema,
+  exerciseIds: z.array(z.uuid()).max(MAX_EXERCISES_IN_LIBRARY),
+})
 
 const setSchema = z.object({
   weight: z.number().min(0).max(MAX_WEIGHT),
@@ -36,6 +50,8 @@ export const syncRequestSchema = z.object({
   finish: z.boolean().optional(),
   startedAt: z.iso.datetime({ offset: true }).optional(),
   finishedAt: z.iso.datetime({ offset: true }).optional(),
+  /** Название сплита: строка — записать, null — убрать, поле не передано — не менять */
+  splitName: z.string().trim().max(MAX_SPLIT_NAME).nullable().optional(),
 })
 
 export type SyncRequest = z.infer<typeof syncRequestSchema>

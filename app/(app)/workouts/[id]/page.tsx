@@ -88,7 +88,11 @@ async function WorkoutDetails({
 
       <PageTitle
         back={justFinished ? { href: '/', label: 'На главную' } : { href: '/history', label: 'История' }}
-        eyebrow={capitalize(formatWeekday(workout.startedAt, tz))}
+        eyebrow={
+          workout.splitName
+            ? `${capitalize(formatWeekday(workout.startedAt, tz))} · ${workout.splitName}`
+            : capitalize(formatWeekday(workout.startedAt, tz))
+        }
         title={dateLabel}
       />
 

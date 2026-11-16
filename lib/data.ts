@@ -4,6 +4,7 @@ import type {
   Exercise,
   ExerciseContext,
   ExerciseStatPoint,
+  Split,
   WeightRecord,
   Workout,
   WorkoutSummary,
@@ -29,14 +30,15 @@ type WorkoutRow = {
   finished_at: string | null
   duration_seconds: number | null
   updated_at: string
+  split_name: string | null
   workout_exercises: WorkoutExerciseRow[]
 }
 
 const WORKOUT_SELECT =
-  'id, status, started_at, finished_at, duration_seconds, updated_at, workout_exercises(id, exercise_id, exercise_name_snapshot, position, workout_sets(set_number, weight, reps))'
+  'id, status, started_at, finished_at, duration_seconds, updated_at, split_name, workout_exercises(id, exercise_id, exercise_name_snapshot, position, workout_sets(set_number, weight, reps))'
 
 const SUMMARY_SELECT =
-  'id, started_at, finished_at, duration_seconds, workout_exercises(exercise_name_snapshot, position, workout_sets(id))'
+  'id, started_at, finished_at, duration_seconds, split_name, workout_exercises(exercise_name_snapshot, position, workout_sets(id))'
 
 function fail(scope: string, error: { message: string }): never {
   throw new Error(`Не удалось загрузить данные (${scope}): ${error.message}`)
@@ -50,6 +52,7 @@ function mapWorkout(row: WorkoutRow): Workout {
     finishedAt: row.finished_at,
     durationSeconds: row.duration_seconds,
     updatedAt: row.updated_at,
+    splitName: row.split_name ?? null,
     exercises: [...row.workout_exercises]
       .sort((a, b) => a.position - b.position)
       .map((e) => ({
@@ -68,6 +71,7 @@ type SummaryRow = {
   started_at: string
   finished_at: string | null
   duration_seconds: number | null
+  split_name: string | null
   workout_exercises: { exercise_name_snapshot: string; position: number; workout_sets: { id: string }[] }[]
 }
 
@@ -78,6 +82,7 @@ function mapSummary(row: SummaryRow): WorkoutSummary {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     durationSeconds: row.duration_seconds,
+    splitName: row.split_name ?? null,
     exerciseNames: exercises.map((e) => e.exercise_name_snapshot),
     setsCount: exercises.reduce((n, e) => n + e.workout_sets.length, 0),
   }
@@ -263,4 +268,83 @@ export async function getExerciseStats(exerciseId: string, limit = 60): Promise<
       topWeight: Number(r.top_weight),
     }))
     .reverse()
+}
+
+// ---------------------------------------------------------------------------
+// Сплиты
+// ---------------------------------------------------------------------------
+
+type SplitRow = {
+  id: string
+  name: string
+  split_exercises: { position: number; exercises: { id: string; name: string } | null }[]
+}
+
+/** Сплиты пользователя в порядке создания; упражнения — в порядке, заданном в сплите. */
+export async function getSplits(): Promise<Split[]> {
+  const { supabase } = await requireSession()
+  const { data, error } = await supabase
+    .from('splits')
+    .select('id, name, split_exercises(position, exercises(id, name))')
+    .order('created_at', { ascending: true })
+  if (error) fail('сплиты', error)
+  return ((data ?? []) as unknown as SplitRow[]).map((row) => ({
+    id: row.id,
+    name: row.name,
+    exercises: [...row.split_exercises]
+      .sort((a, b) => a.position - b.position)
+      .map((item) => item.exercises)
+      .filter((e): e is Exercise => e !== null),
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// Тренировки друга — только чтение.
+// Обычные запросы отдают лишь свои строки (RLS); чужие сохранённые тренировки
+// приходят только через отдельные функции базы friend_*.
+// ---------------------------------------------------------------------------
+
+/** Имя второго пользователя или null, если второго аккаунта ещё нет. */
+export async function getFriendName(): Promise<string | null> {
+  const { supabase } = await requireSession()
+  const { data, error } = await supabase.rpc('friend_display_name')
+  if (error) fail('имя друга', error)
+  return typeof data === 'string' && data ? data : null
+}
+
+type FriendSummaryRow = {
+  id: string
+  started_at: string
+  finished_at: string | null
+  duration_seconds: number | null
+  split_name: string | null
+  exercise_names: string[]
+  sets_count: number
+}
+
+export async function listFriendWorkouts(limit: number): Promise<{ items: WorkoutSummary[]; hasMore: boolean }> {
+  const { supabase } = await requireSession()
+  // на одну больше, чтобы узнать, есть ли продолжение
+  const { data, error } = await supabase.rpc('friend_workouts', { p_limit: limit + 1 })
+  if (error) fail('тренировки друга', error)
+  const rows = (Array.isArray(data) ? data : []) as FriendSummaryRow[]
+  return {
+    items: rows.slice(0, limit).map((row) => ({
+      id: row.id,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      durationSeconds: row.duration_seconds,
+      splitName: row.split_name ?? null,
+      exerciseNames: row.exercise_names ?? [],
+      setsCount: Number(row.sets_count),
+    })),
+    hasMore: rows.length > limit,
+  }
+}
+
+export async function getFriendWorkout(id: string): Promise<Workout | null> {
+  const { supabase } = await requireSession()
+  const { data, error } = await supabase.rpc('friend_workout', { p_workout_id: id })
+  if (error) fail('тренировка друга', error)
+  return data ? mapWorkout(data as WorkoutRow) : null
 }
